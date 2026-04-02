@@ -96,7 +96,7 @@ nav ul{gap:14px}
 </nav>
 
 <div class="intro">
-<h1>200 million visits and counting.</h1>
+<h1>250 million visits and counting.</h1>
 <p>I've been shipping Roblox games professionally since 2019. Started freelancing, worked my way through a handful of studios, and now I run my own. Most of my work is in Lua/Luau using Knit and other frameworks — building things like economy systems, combat, FPS frameworks, AI NPCs, and VR-compatible experiences. I'm finishing up my CS degree at UCCS right now while leading dev at Basket Entertainment.</p>
 <div class="nums">
 <div><div class="v">250M+</div><div class="l">Contributed Visits</div></div>
@@ -295,9 +295,10 @@ function moveCarousel(d){const t=document.querySelector('#basket-carousel .carou
 function goToSlide(i){slideIdx=i;document.querySelector('#basket-carousel .carousel-track').style.transform='translateX(-'+i*100+'%)';updateDots()}
 function updateDots(){document.querySelectorAll('#carousel-dots .dot').forEach(function(d,i){d.classList.toggle('active',i===slideIdx)})}
 
-// Load game thumbnails from Roblox (2-step: get universe IDs, then thumbnails)
+// Load game thumbnails via CORS proxy (Roblox blocks cross-origin from non-roblox domains)
 (async function(){
 const placeIds=["2228128339","583507031","17783560582","12289293395","15896134144","8389346958","112026778837644","70437837702121","113242875628769","9192157302","13185896368"];
+const proxy="https://corsproxy.io/?";
 
 function setThumb(placeId, url){
   document.querySelectorAll('img.rblx-thumb[data-place="'+placeId+'"]').forEach(function(el){
@@ -307,53 +308,41 @@ function setThumb(placeId, url){
 }
 
 try{
-  // Step 1: get universe IDs from place IDs
-  const r1=await fetch("https://games.roblox.com/v1/games/multiget-place-details?placeIds="+placeIds.join("&placeIds="));
-  if(!r1.ok) throw new Error("places API failed");
+  // Step 1: get universe IDs
+  const url1=proxy+encodeURIComponent("https://games.roblox.com/v1/games/multiget-place-details?placeIds="+placeIds.join("&placeIds="));
+  const r1=await fetch(url1);
+  if(!r1.ok) throw new Error("places failed");
   const places=await r1.json();
   
-  // Map place ID -> universe ID
-  const placeToUniverse={};
-  const universeToPlace={};
-  places.forEach(function(p){
-    placeToUniverse[String(p.placeId)]=String(p.universeId);
-    universeToPlace[String(p.universeId)]=String(p.placeId);
+  const u2p={};
+  places.forEach(function(p){ u2p[String(p.universeId)]=String(p.placeId) });
+  const uIds=Object.keys(u2p);
+  if(!uIds.length) throw new Error("no IDs");
+  
+  // Step 2: get thumbnails
+  const url2=proxy+encodeURIComponent("https://thumbnails.roblox.com/v1/games/multiget/thumbnails?universeIds="+uIds.join(",")+"&countPerUniverse=1&defaults=true&size=768x432&format=Png&isCircular=false");
+  const r2=await fetch(url2);
+  if(!r2.ok) throw new Error("thumbs failed");
+  const td=await r2.json();
+  
+  if(td&&td.data) td.data.forEach(function(g){
+    var pid=u2p[String(g.universeId)];
+    if(pid&&g.thumbnails&&g.thumbnails[0]&&g.thumbnails[0].imageUrl) setThumb(pid, g.thumbnails[0].imageUrl);
   });
-  
-  const uIds=Object.values(placeToUniverse);
-  if(uIds.length===0) throw new Error("no universe IDs");
-  
-  // Step 2: get actual game thumbnails (the wide images)
-  const r2=await fetch("https://thumbnails.roblox.com/v1/games/multiget/thumbnails?universeIds="+uIds.join(",")+"&countPerUniverse=1&defaults=true&size=768x432&format=Png&isCircular=false");
-  if(!r2.ok) throw new Error("thumbnails API failed");
-  const thumbData=await r2.json();
-  
-  if(thumbData&&thumbData.data){
-    thumbData.data.forEach(function(g){
-      var pid=universeToPlace[String(g.universeId)];
-      if(pid&&g.thumbnails&&g.thumbnails.length>0&&g.thumbnails[0].imageUrl){
-        setThumb(pid, g.thumbnails[0].imageUrl);
-      }
-    });
-  }
 }catch(e){
-  console.log("Thumbnail loading error:", e);
-  // Fallback: try gameicons endpoint
+  console.log("Error:",e);
+  // Final fallback: try direct without proxy (might work on some hosts)
   try{
     const r3=await fetch("https://thumbnails.roblox.com/v1/places/gameicons?placeIds="+placeIds.join(",")+"&returnPolicy=PlaceHolder&size=512x512&format=Png&isCircular=false");
-    if(r3.ok){
-      const d3=await r3.json();
-      if(d3&&d3.data) d3.data.forEach(function(it){ if(it.imageUrl) setThumb(String(it.targetId), it.imageUrl) });
-    }
-  }catch(e2){console.log("Fallback also failed:", e2)}
+    if(r3.ok){const d=await r3.json();if(d&&d.data)d.data.forEach(function(it){if(it.imageUrl)setThumb(String(it.targetId),it.imageUrl)})}
+  }catch(e2){}
 }
 
-// Cleanup placeholders after 6s
 setTimeout(function(){
   document.querySelectorAll('img.rblx-thumb').forEach(function(el){
     if(!el.complete||el.naturalWidth===0){el.parentElement.innerHTML='<div class="ph">'+el.alt+'</div>'}
   });
-},6000);
+},8000);
 })();
 </script>
 </body>
